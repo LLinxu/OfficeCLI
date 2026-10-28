@@ -1436,12 +1436,9 @@ public class ResidentServer : IDisposable
         // envelope.success / exit code in lockstep with the non-resident
         // path.
         _lastBatchHadFailure = anyFailed;
-        CommandBuilder.PrintBatchResults(results, json, items.Count, atomicRolledBack: rolledBack);
-        // BUG-BT2: emit the collected unrecognized-LaTeX markers so the
-        // dispatcher maps them to exit 2 and the envelope warning code, exactly
-        // as the single-shot resident add/set path (EmitUnrecognizedLatex) does.
-        foreach (var tok in batchUnrecognizedLatex)
-            Console.Error.WriteLine($"  WARNING: {UnrecognizedLatexMarker} {tok}");
+        // Results, envelope, warnings and exit code are the front-end's
+        // (CommandBuilder.FinishBatch); the resident only records the code.
+        _lastCommandExitCode = CommandBuilder.FinishBatch(results, items.Count, json, batchUnrecognizedLatex, rolledBack);
 
         // Notify any live watch session so the preview reflects the batch.
         // Single add/set/move/remove/etc. each call a NotifyWatch* helper in

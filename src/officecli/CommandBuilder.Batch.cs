@@ -164,6 +164,40 @@ static partial class CommandBuilder
     /// <c>FinalizeDeferredIds + Save</c> flush. Output formatting and the
     /// protection gate stay with the caller (their surfaces differ).
     /// </summary>
+    /// <summary>
+    /// Print a batch's results (text, or the read envelope with any
+    /// unrecognised-LaTeX warnings) and decide the exit code: 1 when any
+    /// item failed, else 2 when a warning was raised, else 0. Shared by the
+    /// CLI front-end and the resident so the two cannot drift.
+    /// </summary>
+    internal static int FinishBatch(List<BatchResult> results, int itemCount, bool json,
+        IReadOnlyCollection<string> unrecognizedLatex, bool rolledBack)
+    {
+        var success = results.Count == 0 || !results.Any(r => !r.Success);
+        var warnings = unrecognizedLatex.Select(tok => new OfficeCli.Core.CliWarning
+        {
+            Message = $"unrecognized_latex_command: {tok}",
+            Code = "unrecognized_latex_command",
+            Suggestion = "Check the command spelling; see https://katex.org/docs/supported.html for supported syntax.",
+        }).ToList();
+        if (json)
+        {
+            using var sw = new System.IO.StringWriter();
+            PrintBatchResults(results, json, itemCount, sw, atomicRolledBack: rolledBack);
+            var inner = sw.ToString().TrimEnd('\n', '\r');
+            Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelope(inner, warnings, success: success));
+        }
+        else
+        {
+            PrintBatchResults(results, json, itemCount, atomicRolledBack: rolledBack);
+            foreach (var w in warnings)
+                Console.Error.WriteLine($"  WARNING: {w.Message}");
+        }
+        // Exit precedence: a failed item (1) outranks a warning-only run (2).
+        if (!success) return 1;
+        return warnings.Count > 0 ? 2 : 0;
+    }
+
     internal static List<BatchResult> RunNonResidentBatch(
         OfficeCli.Core.IDocumentHandler handler, List<BatchItem> items,
         bool stopOnError, bool json, ICollection<string>? unrecognizedLatex = null)
@@ -459,10 +493,12 @@ static partial class CommandBuilder
                     return 3;
                 }
                 // The resident returns the formatted batch output directly
+                // Same printing as TryResident: the server trims trailing
+                // newlines, the client restores exactly one.
                 if (!string.IsNullOrEmpty(response.Stdout))
-                    Console.Write(response.Stdout);
+                    Console.WriteLine(response.Stdout.TrimEnd('\r', '\n'));
                 if (!string.IsNullOrEmpty(response.Stderr))
-                    Console.Error.Write(response.Stderr);
+                    Console.Error.WriteLine(response.Stderr.TrimEnd('\r', '\n'));
                 return response.ExitCode;
             }
 
@@ -588,15 +624,7 @@ static partial class CommandBuilder
                 {
                     var protBlock = GetBatchProtectionBlock(handler, items);
                     if (protBlock != null)
-                    {
-                        if (json)
-                            Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelopeError(protBlock, new List<OfficeCli.Core.CliWarning>()));
-                        else
-                            Console.Error.WriteLine($"ERROR: {protBlock}");
-                        if (tmpPath != null)
-                            try { System.IO.File.Delete(tmpPath); } catch { /* best-effort */ }
-                        return 1;
-                    }
+                        throw new CliException(protBlock) { Code = "document_protected" };
                 }
                 // DeferSave + replay loop, shared with the MCP batch surface. The
                 // handler's using-Dispose performs the single FinalizeDeferredIds +
@@ -644,55 +672,8 @@ static partial class CommandBuilder
                     try { System.IO.File.Delete(tmpPath); } catch { /* best-effort */ }
                 }
             }
-            // BUG-R6-02: in --json mode the non-resident path emitted the raw
-            // {"results":...,"summary":...} body while the resident path
-            // wrapped it in {"success":..., "data":{...}} (resident server
-            // calls OutputFormatter.WrapEnvelope on any JSON-shaped stdout).
-            // Capture PrintBatchResults output and apply the same envelope
-            // here so callers see the same shape regardless of resident state.
-            // JSON Envelope contract: batch is a *judgment* command (root
-            // the project conventions "Judgment: any batch step failed -> outer false").
-            // Outer envelope.success is true only when every step succeeded;
-            // a single failed step flips outer to false even if siblings
-            // succeeded. Per-step verdicts still ride on
-            // `data.results[].success`. Exit code stays in lockstep with
-            // envelope.success so CI gates and shells can rely on the single
-            // signal. Two `success` fields appear in the JSON (outer batch
-            // verdict, inner per-step) — disambiguate by JSON path.
-            var batchSuccess = batchResults.Count == 0 || !batchResults.Any(r => !r.Success);
-            // BUG-BT2: surface per-item unrecognized-LaTeX warnings the same way
-            // single-shot add/set do (warning + JSON envelope + exit 2). A batch
-            // whose only issue is an unknown LaTeX command otherwise exited 0
-            // with no diagnostic, silently writing the literal-text fallback.
-            var batchWarnings = new List<OfficeCli.Core.CliWarning>();
-            foreach (var tok in batchUnrecognizedLatex)
-            {
-                batchWarnings.Add(new OfficeCli.Core.CliWarning
-                {
-                    Message = $"unrecognized_latex_command: {tok}",
-                    Code = "unrecognized_latex_command",
-                    Suggestion = "Check the command spelling; see https://katex.org/docs/supported.html for supported syntax.",
-                });
-            }
-            var rolledBack = atomic && !batchSuccess;
-            if (json)
-            {
-                using var sw = new System.IO.StringWriter();
-                PrintBatchResults(batchResults, json, items.Count, sw, atomicRolledBack: rolledBack);
-                var inner = sw.ToString().TrimEnd('\n', '\r');
-                Console.WriteLine(OfficeCli.Core.OutputFormatter.WrapEnvelope(inner, batchWarnings, success: batchSuccess));
-            }
-            else
-            {
-                PrintBatchResults(batchResults, json, items.Count, atomicRolledBack: rolledBack);
-                foreach (var w in batchWarnings)
-                    Console.Error.WriteLine($"  WARNING: {w.Message}");
-            }
-            // (watch notify happened inside the handler scope above)
-            // Exit precedence: a failed item (exit 1) outranks an
-            // unrecognized-LaTeX-only warning (exit 2 mirrors single-shot).
-            if (!batchSuccess) return 1;
-            return batchWarnings.Count > 0 ? 2 : 0;
+            var rolledBack = atomic && batchResults.Any(r => !r.Success);
+            return FinishBatch(batchResults, items.Count, json, batchUnrecognizedLatex, rolledBack);
         }, json); });
 
         return batchCommand;
