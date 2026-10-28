@@ -1625,7 +1625,7 @@ public class ResidentServer : IDisposable
         if (format == OutputFormat.Json)
             Console.WriteLine(OutputFormatter.FormatNodes(new List<DocumentNode> { node }, format));
         else
-            Console.WriteLine(OutputFormatter.FormatNode(node, format));
+            Console.WriteLine(OutputFormatter.FormatNode(node, format).TrimEnd('\r', '\n'));
     }
 
     // BUG-DUMP-R6-01: dump used to bypass the resident and open its own
@@ -1761,24 +1761,9 @@ public class ResidentServer : IDisposable
         // CONSISTENCY(query-json-children): hydrate Children from Get(path, depth=1)
         // for JSON output so consumers see the same shape as `get --json`. Mirrors
         // the post-processing in CommandBuilder.GetQuery.cs.
-        if (format == OutputFormat.Json)
-        {
-            foreach (var n in results)
-            {
-                if (n.ChildCount > 0 && n.Children.Count == 0 && !string.IsNullOrEmpty(n.Path))
-                {
-                    try
-                    {
-                        var hydrated = _handler.Get(n.Path, depth: 1);
-                        if (hydrated?.Children != null && hydrated.Children.Count > 0)
-                            n.Children.AddRange(hydrated.Children);
-                    }
-                    catch { /* path may not be Get-resolvable; leave empty */ }
-                }
-            }
-        }
-        foreach (var w in warnings) Console.Error.WriteLine(w.Message);
-        Console.WriteLine(OutputFormatter.FormatNodes(results, format));
+        // Printing (children hydration, envelope with selector warnings,
+        // "No matches" hint) is the front-end's — CommandBuilder.PrintQueryResults.
+        CommandBuilder.PrintQueryResults(_handler, results, warnings, req.Json, Path.GetExtension(_filePath));
     }
 
     private void ExecuteSet(ResidentRequest req)
