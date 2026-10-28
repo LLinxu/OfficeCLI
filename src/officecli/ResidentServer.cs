@@ -867,13 +867,16 @@ public class ResidentServer : IDisposable
             // clear per request so a caveat never leaks into the next command.
             var rawCaveats = _lastRawMutationHadValidationCaveats;
             _lastRawMutationHadValidationCaveats = false;
+            var coreCaveats = _lastCommandExitCode == 2;
+            _lastCommandExitCode = null;
 
             if (request.Json)
             {
                 // JSON mode: server builds the envelope so client just passes through
                 var warnings = BuildWarnings(stderr);
                 var isFailure = string.IsNullOrEmpty(stdout) && warnings is { Count: > 0 }
-                    || stdout.StartsWith("No properties applied", StringComparison.Ordinal);
+                    || stdout.StartsWith("No properties applied", StringComparison.Ordinal)
+                    || stdout.StartsWith("Error: No properties applied", StringComparison.Ordinal);
                 // JSON Envelope contract: propagate judgment-command verdicts
                 // (batch / validate) into envelope.success so it agrees with
                 // exit code on line below. Without this the resident path
@@ -916,7 +919,7 @@ public class ResidentServer : IDisposable
                 int jsonExitCode = 0;
                 if (batchFailure || validateFailure || refreshFailure)
                     jsonExitCode = 1;
-                else if (rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker))
+                else if (coreCaveats || rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker))
                     jsonExitCode = 2;
                 else if (!EnvelopeSuccess(envelope))
                     jsonExitCode = 1;
@@ -930,7 +933,7 @@ public class ResidentServer : IDisposable
             // ReportRawMutationOutcome; exit 1 here made callers retry and
             // duplicate content, issue #374).
             int exitCode = (batchFailure || validateFailure || refreshFailure) ? 1
-                : ((rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker)) ? 2
+                : ((coreCaveats || rawCaveats || stderr.Contains("UNSUPPORTED") || stderr.Contains(UnrecognizedLatexMarker)) ? 2
                 : 0);
             return MakeResponse(exitCode, stdout, stderr);
         }
@@ -1241,6 +1244,10 @@ public class ResidentServer : IDisposable
                 throw new InvalidOperationException($"Unknown command: {request.Command}");
         }
     }
+
+    // Exit code decided by a shared command core (RunSet: 2 = applied with
+    // unsupported props / unrecognised LaTeX). Consumed once per request.
+    private int? _lastCommandExitCode;
 
     // BUG-R40-B10: track whether the most recent ExecuteBatch saw any
     // failures so ProcessRequest can surface a non-zero exit code.
@@ -1796,125 +1803,11 @@ public class ResidentServer : IDisposable
         // selector-count, watch, overflow, --json wrapping) stays below.
         // CONSISTENCY(applied-echo): mirrors CommandBuilder.Set.cs — pre/post
         // Format snapshots feed the " (applied: ...)" normalization echo.
-        var beforeSnap = CommandBuilder.TryGetFormatSnapshot(_handler, path);
-        var (applied, unsupported, autoCorrected) =
-            CommandBuilder.ApplySetWithCorrection(_handler, path, properties);
-
-        // CONSISTENCY(find-match-count): mirrored in CommandBuilder.Set.cs.
-        // The resident path is hit whenever a resident process is open
-        // (which `create` does by default), so both sites must surface
-        // findMatchCount + zero_matches warning identically.
-        int? findMatchCount = null;
-        if (properties.ContainsKey("find"))
-        {
-            findMatchCount = _handler switch
-            {
-                WordHandler wh => wh.LastFindMatchCount,
-                PowerPointHandler ph => ph.LastFindMatchCount,
-                ExcelHandler eh => eh.LastFindMatchCount,
-                _ => null
-            };
-        }
-
-        // CONSISTENCY(selector-set): echo how many elements a multi-match selector
-        // set touched, so a Sheet1!row[工资>5000]-style mutation makes its scope
-        // visible. Single-target paths (count 1) stay quiet.
-        int? selectorCount = null;
-        if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
-            selectorCount = _handler switch
-            {
-                WordHandler wh => wh.LastSelectorSetCount,
-                PowerPointHandler ph => ph.LastSelectorSetCount,
-                ExcelHandler eh => eh.LastSelectorSetCount,
-                _ => null
-            };
-
-        // R4-bt-1: report the post-move resolvable path for equation mode
-        // switches (oMathPara ⇄ oMath), consistent with the non-resident path.
-        var reportPath = (_handler as WordHandler)?.LastSetNewPath ?? path;
-        var appliedSuffix = CommandBuilder.BuildAppliedSuffix(applied,
-            beforeSnap, CommandBuilder.TryGetFormatSnapshot(_handler, reportPath));
-        var message = applied.Count > 0
-            ? $"Updated {reportPath}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
-              + appliedSuffix
-              + (findMatchCount.HasValue ? $" ({findMatchCount.Value} matched)" : "")
-              + (selectorCount > 1 ? $" ({selectorCount} elements matched)" : "")
-            : (unsupported.Count > 0 ? $"No properties applied to {path}" : $"Updated {path}");
-
-        var warnings = new List<OfficeCli.Core.CliWarning>();
-        foreach (var ac in autoCorrected)
-            warnings.Add(new OfficeCli.Core.CliWarning
-            {
-                Message = $"Auto-corrected '{ac.Original}' to '{ac.Corrected}'",
-                Code = "auto_corrected",
-            });
-        if (findMatchCount is 0)
-        {
-            warnings.Add(new OfficeCli.Core.CliWarning
-            {
-                Message = $"find pattern matched 0 occurrences at {path} — original text may have been edited or the path is wrong",
-                Code = "zero_matches",
-                Suggestion = "verify the path still resolves and the find text is current"
-            });
-        }
-        var overflow = CommandBuilder.CheckTextOverflow(_handler, path);
-        if (overflow != null)
-        {
-            warnings.Add(new OfficeCli.Core.CliWarning
-            {
-                Message = overflow,
-                Code = "text_overflow",
-                Suggestion = "Increase shape height/width, reduce font size, or shorten text"
-            });
-        }
-        if (_handler is WordHandler setWhWarn)
-        {
-            foreach (var w in setWhWarn.LastSetWarnings)
-                warnings.Add(new OfficeCli.Core.CliWarning { Message = w, Code = "advisory" });
-        }
-
-        if (req.Json)
-        {
-            bool allFailed = applied.Count == 0 && unsupported.Count > 0;
-            Console.WriteLine(allFailed
-                ? OutputFormatter.WrapEnvelopeError(message, warnings.Count > 0 ? warnings : null)
-                : OutputFormatter.WrapEnvelopeText(message, warnings.Count > 0 ? warnings : null, findMatchCount));
-        }
-        else
-        {
-            if (applied.Count > 0 || unsupported.Count > 0) Console.WriteLine(message);
-            foreach (var ac in autoCorrected)
-                Console.Error.WriteLine($"WARNING: Auto-corrected '{ac.Original}' to '{ac.Corrected}'");
-            if (findMatchCount is 0)
-                Console.Error.WriteLine($"WARNING: find pattern matched 0 occurrences at {path}");
-            if (overflow != null)
-                Console.Error.WriteLine($"  WARNING: {overflow}");
-            if (_handler is WordHandler setWhWarnPlain)
-            {
-                foreach (var w in setWhWarnPlain.LastSetWarnings)
-                    Console.Error.WriteLine($"  WARNING: {w}");
-            }
-        }
-
-        // Unrecognized LaTeX from an equation Set (formula=). Same emission as
-        // ExecuteAdd — distinctive stderr line drives exit 2 + envelope code.
-        EmitUnrecognizedLatex(_handler);
-
-        if (unsupported.Count > 0)
-        {
-            // /styles/<id> on Word: targeted curated hints, no raw-set push.
-            // See StyleUnsupportedHints + matching branch in CommandBuilder.
-            if (_handler is WordHandler
-                && path.StartsWith("/styles/", StringComparison.Ordinal))
-            {
-                var styleHint = OfficeCli.Core.StyleUnsupportedHints.Format(unsupported);
-                if (styleHint != null) Console.Error.WriteLine(styleHint);
-            }
-            else
-            {
-                Console.Error.WriteLine(FormatUnsupportedLine(unsupported));
-            }
-        }
+        // The command itself is CommandBuilder.RunSet, shared with the CLI
+        // front-end; only the exit-code plumbing is the resident's.
+        var outcome = CommandBuilder.RunSet(_handler, _filePath, path, properties, req.Json,
+            isSelectorSet: !string.IsNullOrEmpty(path) && !path.StartsWith("/"));
+        _lastCommandExitCode = outcome.ExitCode;
     }
 
     // When the handler already attached a parenthetical hint naming the valid
