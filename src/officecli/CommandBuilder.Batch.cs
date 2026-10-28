@@ -195,9 +195,11 @@ static partial class CommandBuilder
             foreach (var w in warnings)
                 Console.Error.WriteLine($"  WARNING: {w.Message}");
         }
-        // Exit precedence: a failed item (1) outranks a warning-only run (2).
+        // Exit precedence: a failed item (1) outranks "applied with caveats"
+        // (2), which only an unrecognised LaTeX command raises; informational
+        // warnings lifted from stderr do not change the exit code.
         if (!success) return 1;
-        return warnings.Count > 0 ? 2 : 0;
+        return unrecognizedLatex.Count > 0 ? 2 : 0;
     }
 
     internal static List<BatchResult> RunNonResidentBatch(

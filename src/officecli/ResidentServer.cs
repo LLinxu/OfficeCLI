@@ -812,6 +812,7 @@ public class ResidentServer : IDisposable
 
             // --json: collect handler warnings (code + suggestion) exactly as
             // the CLI front-end does, instead of lifting stderr lines.
+            List<CliWarning>? contextWarnings = null;
             if (request.Json) OfficeCli.Core.WarningContext.Begin();
             try
             {
@@ -836,7 +837,11 @@ public class ResidentServer : IDisposable
             {
                 Console.SetOut(origOut);
                 Console.SetError(origErr);
-                OfficeCli.Core.WarningContext.End(); // anything not consumed by an envelope is discarded
+                // Warnings a command queued but did not wrap itself (add, remove,
+                // move, swap print plain text) are merged into the envelope built
+                // below; a command that wrapped its own envelope has already
+                // drained them.
+                contextWarnings = OfficeCli.Core.WarningContext.End();
             }
 
             var stdout = stdoutWriter.ToString().TrimEnd('\r', '\n');
@@ -885,6 +890,11 @@ public class ResidentServer : IDisposable
             {
                 // JSON mode: server builds the envelope so client just passes through
                 var warnings = BuildWarnings(stderr);
+                if (contextWarnings is { Count: > 0 })
+                {
+                    warnings ??= new List<CliWarning>();
+                    warnings.AddRange(contextWarnings);
+                }
                 var isFailure = string.IsNullOrEmpty(stdout) && warnings is { Count: > 0 }
                     || stdout.StartsWith("No properties applied", StringComparison.Ordinal)
                     || stdout.StartsWith("Error: No properties applied", StringComparison.Ordinal);
