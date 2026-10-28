@@ -339,6 +339,8 @@ static partial class CommandBuilder
                 var firstLine = string.IsNullOrEmpty(stderr)
                     ? ""
                     : stderr.Split('\n', 2)[0].TrimEnd('\r').Trim();
+                // "Unhandled exception: System.Xml.XmlException: <msg>" → "<msg>"
+                firstLine = System.Text.RegularExpressions.Regex.Replace(firstLine, @"^Unhandled exception:\s*[\w.]+Exception:\s*", "");
                 error = string.IsNullOrEmpty(firstLine)
                     ? "Resident process exited."
                     : $"Resident process exited. {firstLine}";
@@ -1997,14 +1999,13 @@ static partial class CommandBuilder
                 return 0;
 
             // Document is protected — block the write
-            var msg = $"Document is protected (mode: {protection}). " +
-                      "Use Query(\"editable\") to find editable fields, or use --force to override protection.";
-            if (json)
-                Console.WriteLine(OutputFormatter.WrapEnvelopeError(msg, new List<OfficeCli.Core.CliWarning>()));
-            else
-                Console.Error.WriteLine($"ERROR: {msg}");
-            return 1;
+            // Same error shape as batch / the resident: a coded CliException.
+            throw new OfficeCli.Core.CliException(
+                $"Document is protected (mode: {protection}). " +
+                "Use Query(\"editable\") to find editable fields, or use --force to override protection.")
+            { Code = "document_protected" };
         }
+        catch (OfficeCli.Core.CliException) { throw; } // the protection verdict itself
         catch
         {
             // If we can't read protection info, allow the write to proceed

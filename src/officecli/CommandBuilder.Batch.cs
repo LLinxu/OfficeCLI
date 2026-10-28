@@ -171,7 +171,8 @@ static partial class CommandBuilder
     /// CLI front-end and the resident so the two cannot drift.
     /// </summary>
     internal static int FinishBatch(List<BatchResult> results, int itemCount, bool json,
-        IReadOnlyCollection<string> unrecognizedLatex, bool rolledBack)
+        IReadOnlyCollection<string> unrecognizedLatex, bool rolledBack,
+        List<OfficeCli.Core.CliWarning>? extraWarnings = null)
     {
         var success = results.Count == 0 || !results.Any(r => !r.Success);
         var warnings = unrecognizedLatex.Select(tok => new OfficeCli.Core.CliWarning
@@ -180,6 +181,7 @@ static partial class CommandBuilder
             Code = "unrecognized_latex_command",
             Suggestion = "Check the command spelling; see https://katex.org/docs/supported.html for supported syntax.",
         }).ToList();
+        if (extraWarnings is { Count: > 0 }) warnings.AddRange(extraWarnings);
         if (json)
         {
             using var sw = new System.IO.StringWriter();
@@ -614,6 +616,7 @@ static partial class CommandBuilder
             }
             List<BatchResult> batchResults;
             var batchUnrecognizedLatex = new List<string>();
+            List<OfficeCli.Core.CliWarning>? batchStderrWarnings = null;
             bool batchSuccessLocal;
             try
             {
@@ -629,7 +632,20 @@ static partial class CommandBuilder
                 // DeferSave + replay loop, shared with the MCP batch surface. The
                 // handler's using-Dispose performs the single FinalizeDeferredIds +
                 // Save flush.
-                batchResults = RunNonResidentBatch(handler, items, stopOnError, json, batchUnrecognizedLatex);
+                // --json: handler/selector warnings written to stderr while the
+                // items run become envelope warnings, as they do through the
+                // resident (same classifier).
+                if (json)
+                {
+                    var origErr = Console.Error;
+                    var errCapture = new System.IO.StringWriter();
+                    Console.SetError(errCapture);
+                    try { batchResults = RunNonResidentBatch(handler, items, stopOnError, json, batchUnrecognizedLatex); }
+                    finally { Console.SetError(origErr); }
+                    batchStderrWarnings = ResidentServer.BuildWarnings(errCapture.ToString().TrimEnd('\r', '\n'));
+                }
+                else
+                    batchResults = RunNonResidentBatch(handler, items, stopOnError, json, batchUnrecognizedLatex);
                 batchSuccessLocal = batchResults.Count == 0 || !batchResults.Any(r => !r.Success);
                 // Watch preview: only when the document actually changes — the
                 // atomic rollback leaves the file exactly as the preview
@@ -673,7 +689,7 @@ static partial class CommandBuilder
                 }
             }
             var rolledBack = atomic && batchResults.Any(r => !r.Success);
-            return FinishBatch(batchResults, items.Count, json, batchUnrecognizedLatex, rolledBack);
+            return FinishBatch(batchResults, items.Count, json, batchUnrecognizedLatex, rolledBack, batchStderrWarnings);
         }, json); });
 
         return batchCommand;

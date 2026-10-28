@@ -63,14 +63,7 @@ static partial class CommandBuilder
             // throw and exit 1 via SafeRun. Treat error-type nodes the same
             // way so callers get a consistent non-zero exit on missing paths.
             if (string.Equals(node.Type, "error", StringComparison.Ordinal))
-            {
-                var err = node.Text ?? $"Path not found: {path}";
-                if (json)
-                    Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
-                else
-                    Console.Error.WriteLine($"Error: {err}");
-                return 1;
-            }
+                throw new OfficeCli.Core.CliException(node.Text ?? $"Path not found: {path}") { Code = "not_found" };
 
             // --save <path>: extract the binary payload backing an OLE /
             // picture / media node to disk. The handler exposes this via
@@ -80,14 +73,8 @@ static partial class CommandBuilder
             if (!string.IsNullOrEmpty(savePath))
             {
                 if (!handler.TryExtractBinary(path, savePath, out var contentType, out var byteCount))
-                {
-                    var err = $"Node at '{path}' has no binary payload to extract (only ole/picture/media/embedded nodes can be saved).";
-                    if (json)
-                        Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
-                    else
-                        Console.Error.WriteLine($"Error: {err}");
-                    return 1;
-                }
+                    throw new OfficeCli.Core.CliException($"Node at '{path}' has no binary payload to extract (only ole/picture/media/embedded nodes can be saved).")
+                    { Code = "unsupported_type", Suggestion = "Point --save at a picture, media, ole or embedded node (see `query picture`)." };
                 node.Format["savedTo"] = savePath;
                 node.Format["savedBytes"] = byteCount;
                 if (!string.IsNullOrEmpty(contentType))
@@ -192,6 +179,9 @@ static partial class CommandBuilder
             if (compact && json)
                 throw new OfficeCli.Core.CliException("--compact is a plain-text line format; drop --json (or drop --compact for the JSON tree).") { Code = "invalid_value" };
 
+            if (string.IsNullOrWhiteSpace(selector))
+                throw new OfficeCli.Core.CliException("'query' requires a selector (e.g. paragraph, shape, row[Score>80]).")
+                { Code = "invalid_input", Suggestion = "Run 'officecli query --help' for selector syntax." };
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "query";
@@ -314,7 +304,7 @@ static partial class CommandBuilder
             if (results.Count == 0)
             {
                 var ext = extension.ToLowerInvariant().TrimStart('.');
-                Console.Error.WriteLine($"No matches. Run 'officecli {ext} query' for selector syntax.");
+                Console.Error.WriteLine($"No matches. Run 'officecli help {ext} query' for selector syntax.");
             }
         }
     }

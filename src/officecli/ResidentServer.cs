@@ -777,7 +777,13 @@ public class ResidentServer : IDisposable
 
     private string ProcessRequest(string requestLine)
     {
+        // Per-request verdict state. Cleared on entry, not after the command:
+        // a request that set it and then aborted (e.g. the each-mode flush
+        // threw) must not hand its exit code to the next request.
+        _lastCommandExitCode = null;
+        _lastRawMutationHadValidationCaveats = false;
         ResidentRequest? request = null;
+        StringWriter? capturedErr = null; // the command's stderr, kept for the error path
         try
         {
             request = System.Text.Json.JsonSerializer.Deserialize<ResidentRequest>(requestLine, ResidentJsonContext.Default.ResidentRequest);
@@ -787,6 +793,7 @@ public class ResidentServer : IDisposable
             // Capture stdout/stderr (safe: _commandLock serializes all commands)
             var stdoutWriter = new StringWriter();
             var stderrWriter = new StringWriter();
+            capturedErr = stderrWriter;
             var origOut = Console.Out;
             var origErr = Console.Error;
             Console.SetOut(stdoutWriter);
@@ -803,6 +810,9 @@ public class ResidentServer : IDisposable
                 _startupStderr = null;
             }
 
+            // --json: collect handler warnings (code + suggestion) exactly as
+            // the CLI front-end does, instead of lifting stderr lines.
+            if (request.Json) OfficeCli.Core.WarningContext.Begin();
             try
             {
                 ExecuteCommand(request);
@@ -826,6 +836,7 @@ public class ResidentServer : IDisposable
             {
                 Console.SetOut(origOut);
                 Console.SetError(origErr);
+                OfficeCli.Core.WarningContext.End(); // anything not consumed by an envelope is discarded
             }
 
             var stdout = stdoutWriter.ToString().TrimEnd('\r', '\n');
@@ -975,7 +986,11 @@ public class ResidentServer : IDisposable
             // non-resident CLI path (WriteError in Program.cs). Without
             // this, clients diffing stderr across modes would mis-detect
             // failures.
-            return MakeResponse(1, "", $"Error: {OfficeCli.Core.MsysPathHint.AugmentMessage(rendered.Message)}");
+            // Keep what the command had already written to stderr (e.g. a
+            // selector warning) ahead of the error, as the direct path does.
+            var priorErr = capturedErr?.ToString().TrimEnd('\r', '\n') ?? "";
+            var errLine = $"Error: {OfficeCli.Core.MsysPathHint.AugmentMessage(rendered.Message)}";
+            return MakeResponse(1, "", priorErr.Length > 0 ? priorErr + "\n" + errLine : errLine);
         }
     }
 
@@ -1061,7 +1076,7 @@ public class ResidentServer : IDisposable
         }
     }
 
-    private static List<CliWarning>? BuildWarnings(string stderr)
+    internal static List<CliWarning>? BuildWarnings(string stderr)
     {
         if (string.IsNullOrEmpty(stderr)) return null;
         var lines = stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -1600,7 +1615,7 @@ public class ResidentServer : IDisposable
         // than throwing. Convert to a real exception so the resident response
         // exits non-zero, matching the direct-mode CLI behavior.
         if (string.Equals(node.Type, "error", StringComparison.Ordinal))
-            throw new ArgumentException(node.Text ?? $"Path not found: {path}");
+            throw new OfficeCli.Core.CliException(node.Text ?? $"Path not found: {path}") { Code = "not_found" };
 
         // CONSISTENCY(get-save): mirror CommandBuilder.GetQuery.cs lines 59-74.
         // Direct-mode `get --save` extracts the binary payload backing an
@@ -1610,8 +1625,8 @@ public class ResidentServer : IDisposable
         if (!string.IsNullOrEmpty(savePath))
         {
             if (!_handler.TryExtractBinary(path, savePath, out var contentType, out var byteCount))
-                throw new InvalidOperationException(
-                    $"Node at '{path}' has no binary payload to extract (only ole/picture/media/embedded nodes can be saved).");
+                throw new OfficeCli.Core.CliException($"Node at '{path}' has no binary payload to extract (only ole/picture/media/embedded nodes can be saved).")
+                { Code = "unsupported_type", Suggestion = "Point --save at a picture, media, ole or embedded node (see `query picture`)." };
             node.Format["savedTo"] = savePath;
             node.Format["savedBytes"] = byteCount;
             if (!string.IsNullOrEmpty(contentType))
@@ -1737,7 +1752,8 @@ public class ResidentServer : IDisposable
         // every node — mirror CommandBuilder's batch-query guard.
         var selector = req.GetArgOrNull("selector") ?? req.GetArgOrNull("path") ?? "";
         if (string.IsNullOrEmpty(selector))
-            throw new ArgumentException("'query' requires a selector. Example: {\"command\": \"query\", \"selector\": \"row[Score>80]\"}");
+            throw new OfficeCli.Core.CliException("'query' requires a selector (e.g. paragraph, shape, row[Score>80]).")
+            { Code = "invalid_input", Suggestion = "Run 'officecli query --help' for selector syntax." };
         // CONSISTENCY(cell-selector-alias): mirror the direct-mode normalization +
         // boolean engine in CommandBuilder.GetQuery.cs — without alias normalization,
         // resident-mode Excel cell queries with short aliases (bold, size, ...)
@@ -1777,14 +1793,6 @@ public class ResidentServer : IDisposable
         // The handler selector branch throws on an empty match, so no silent no-op.
         // Agent-safety: reject a bare unscoped selector (mirrors CommandBuilder).
         OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
-        // Shared core: apply + prop-autocorrect + categorise — one copy across
-        // CLI / batch / MCP / resident (CommandBuilder.ApplySetWithCorrection).
-        // This also gives the resident the distance-1 typo auto-correction it
-        // previously lacked, so `set colot=color` behaves the same whether or
-        // not a resident is alive. The resident's own envelope (find-count,
-        // selector-count, watch, overflow, --json wrapping) stays below.
-        // CONSISTENCY(applied-echo): mirrors CommandBuilder.Set.cs — pre/post
-        // Format snapshots feed the " (applied: ...)" normalization echo.
         // The command itself is CommandBuilder.RunSet, shared with the CLI
         // front-end; only the exit-code plumbing is the resident's.
         var outcome = CommandBuilder.RunSet(_handler, _filePath, path, properties, req.Json,

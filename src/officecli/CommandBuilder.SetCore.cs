@@ -47,7 +47,7 @@ static partial class CommandBuilder
         var (applied, stillUnsupported, autoCorrected) = ApplySetWithCorrection(handler, path, properties);
 
         // Get find match count if applicable.
-        // CONSISTENCY(find-match-count): mirrored in ResidentServer.ExecuteSet.
+        // find-match count: surfaced on both paths through this one implementation.
         // The resident path is hit whenever a resident process is open
         // (which `create` does by default), so both sites must surface
         // findMatchCount + zero_matches warning identically.
