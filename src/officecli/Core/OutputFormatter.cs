@@ -723,8 +723,16 @@ internal static class OutputFormatter
         };
     }
 
+    /// <summary>Format keys starting with '_' are internal markers (e.g. _widthDerived for dump); hide them from get/query output.</summary>
+    private static void StripInternalKeys(DocumentNode node)
+    {
+        foreach (var k in node.Format.Keys.Where(k => k.StartsWith('_')).ToList()) node.Format.Remove(k);
+        foreach (var c in node.Children) StripInternalKeys(c);
+    }
+
     public static string FormatNode(DocumentNode node, OutputFormat format)
     {
+        StripInternalKeys(node);
         if (format == OutputFormat.Json)
             return JsonSerializer.Serialize(node, AppJsonContext.Default.DocumentNode);
 
@@ -733,6 +741,7 @@ internal static class OutputFormatter
 
     public static string FormatNodes(List<DocumentNode> nodes, OutputFormat format)
     {
+        foreach (var n in nodes) StripInternalKeys(n);
         if (format == OutputFormat.Json)
             return JsonSerializer.Serialize(new NodesResult { Matches = nodes.Count, Results = nodes }, AppJsonContext.Default.NodesResult);
 
