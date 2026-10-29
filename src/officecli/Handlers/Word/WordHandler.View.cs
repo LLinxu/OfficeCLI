@@ -485,7 +485,10 @@ public partial class WordHandler
                     }
                     else
                     {
-                        var text = GetParagraphText(para);
+                        // A soft line break (<w:br/>, read back as \v) is one
+                        // element line here; show it as a space so the words do
+                        // not run together ("line one line two").
+                        var text = GetParagraphText(para).Replace('\v', ' ');
                         var listPrefix = GetListPrefix(para, listCounter);
                         sb.AppendLine($"[{path}] {sdtLabel}{listPrefix}{text}");
                     }
