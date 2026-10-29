@@ -231,6 +231,12 @@ public partial class PowerPointHandler
         // `query title` selector (IsTitle=true); textbox should only match
         // non-title shapes for symmetry.
         if (selector.ElementType == "textbox" && IsTitle(shape)) return false;
+        // `textbox` is the shapes Get reports as Type="textbox" (cNvSpPr
+        // txBox="1"); every other sp is a plain `shape`, so `textbox[N]` is
+        // positional over text boxes, not over all shapes.
+        if (selector.ElementType == "textbox"
+            && shape.NonVisualShapeProperties?.NonVisualShapeDrawingProperties?.TextBox?.Value != true)
+            return false;
 
         // Title filter
         if (selector.IsTitle.HasValue)
