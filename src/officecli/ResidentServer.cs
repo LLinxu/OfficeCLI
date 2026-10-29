@@ -1618,7 +1618,7 @@ public class ResidentServer : IDisposable
     {
         var path = req.GetArg("path", "/");
         var depth = req.GetIntArg("depth") ?? 1;
-        var node = _handler.Get(path, depth);
+        var node = CommandBuilder.GetNodeAtDepth(_handler, path, depth);
 
         // CONSISTENCY(get-not-found-exit): mirror CommandBuilder.GetQuery.cs.
         // Some handler Get paths surface "not found" via Type="error" rather

@@ -55,7 +55,7 @@ static partial class CommandBuilder
             }, json) is {} rc) return rc;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName);
-            var node = handler.Get(path, depth);
+            var node = GetNodeAtDepth(handler, path, depth);
 
             // CONSISTENCY(get-not-found-exit): some handler Get paths surface
             // "not found" via DocumentNode { Type = "error" } instead of
@@ -263,9 +263,21 @@ static partial class CommandBuilder
     /// text prints the warnings on stderr, the nodes, and a "No matches" hint
     /// when nothing matched. Shared by the CLI front-end and the resident.
     /// </summary>
-    internal static void PrintQueryResults(IDocumentHandler handler, List<DocumentNode> results,
-        List<OfficeCli.Core.AttributeFilter.FilterDiagnostic> warnings, bool json, string extension)
+    /// <summary>`get` with --depth 0 answers the node itself, without its children (depth 1 is the default).</summary>
+    internal static DocumentNode GetNodeAtDepth(IDocumentHandler handler, string path, int depth)
     {
+        if (depth < 0)
+            throw new OfficeCli.Core.CliException($"Invalid --depth {depth}: must be >= 0.") { Code = "invalid_value" };
+        var node = handler.Get(path, Math.Max(depth, 1));
+        if (depth == 0) node.Children.Clear();
+        return node;
+    }
+
+    internal static void PrintQueryResults(IDocumentHandler handler, List<DocumentNode> results,
+        List<OfficeCli.Core.AttributeFilter.FilterDiagnostic> warnings, bool json, string extension, string? fields = null)
+    {
+        if (!string.IsNullOrWhiteSpace(fields))
+            Console.Error.WriteLine("Warning: --fields only applies to --compact output; ignored.");
         if (json)
         {
             foreach (var n in results)
