@@ -215,7 +215,7 @@ static partial class CommandBuilder
                 Console.WriteLine(FormatNodesCompact(handler, results, fields));
                 return 0;
             }
-            PrintQueryResults(handler, results, warnings, json, file.Extension);
+            PrintQueryResults(handler, results, warnings, json, file.Extension, fields);
             return 0;
         }, json); });
 
@@ -372,6 +372,10 @@ static partial class CommandBuilder
                       .Append(n.Format.TryGetValue(f, out var v) && v != null ? v.ToString() : "");
             sb.Append('\n');
         }
+
+        if (fieldList != null && results.Count > 0)
+            foreach (var f in fieldList.Where(f => !results.Any(n => n.Format.ContainsKey(f))))
+                Console.Error.WriteLine($"Warning: --fields '{f}' is not a Format key of any matched element (column left empty).");
 
         var (total, containerSuffix) = CountCompactDenominator(handler);
         sb.Append($"total: {results.Count} of {total} elements{containerSuffix}");

@@ -1789,7 +1789,7 @@ public class ResidentServer : IDisposable
         // the post-processing in CommandBuilder.GetQuery.cs.
         // Printing (children hydration, envelope with selector warnings,
         // "No matches" hint) is the front-end's — CommandBuilder.PrintQueryResults.
-        CommandBuilder.PrintQueryResults(_handler, results, warnings, req.Json, Path.GetExtension(_filePath));
+        CommandBuilder.PrintQueryResults(_handler, results, warnings, req.Json, Path.GetExtension(_filePath), req.GetArgOrNull("fields"));
     }
 
     private void ExecuteSet(ResidentRequest req)
