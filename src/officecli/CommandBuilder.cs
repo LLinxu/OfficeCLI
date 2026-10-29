@@ -811,6 +811,14 @@ static partial class CommandBuilder
     internal static SetApplyOutcome ApplySetWithCorrection(
         OfficeCli.Core.IDocumentHandler handler, string path, Dictionary<string, string> props)
     {
+        var hasFind = props.Keys.Any(k => k.Equals("find", StringComparison.OrdinalIgnoreCase));
+        var hasReplace = props.Keys.Any(k => k.Equals("replace", StringComparison.OrdinalIgnoreCase));
+        if (hasReplace && !hasFind)
+            throw new OfficeCli.Core.CliException("'replace' requires 'find': nothing to replace was specified.")
+            { Code = "invalid_input", Suggestion = "Pass --find <text> together with --replace, or set text= to overwrite the whole text." };
+        if ((hasFind || hasReplace) && handler is OfficeCli.Handlers.ExcelHandler)
+            throw new OfficeCli.Core.CliException("find/replace is not supported on xlsx cells (cells hold a single value).")
+            { Code = "invalid_input", Suggestion = "Set the cell with --prop value=<text>, or use a selector such as Sheet1!cell[value=old] with value=new." };
         var raw = handler.Set(path, props);
         string? scope = handler switch
         {
