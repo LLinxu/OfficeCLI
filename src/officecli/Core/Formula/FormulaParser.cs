@@ -1105,6 +1105,7 @@ internal static class FormulaParser
         try
         {
         var elements = new List<OpenXmlElement>();
+        var closed = false;
 
         while (pos < tokens.Count)
         {
@@ -1112,7 +1113,7 @@ internal static class FormulaParser
 
             if (token.Type == TokenType.RBrace)
             {
-                if (insideBraces) { pos++; break; }
+                if (insideBraces) { pos++; closed = true; break; }
                 pos++;
                 continue;
             }
@@ -1162,6 +1163,11 @@ internal static class FormulaParser
             }
         }
 
+        // An argument group that ran out of input before its '}' ("\\frac{a}{")
+        // used to be accepted silently with an empty argument; surface it
+        // through the same channel as an unknown command so the caller gets
+        // a warning and exit 2 instead of a silently incomplete formula.
+        if (insideBraces && !closed) RecordUnrecognized("{ (unclosed brace: missing '}')");
         return elements;
         }
         finally { _groupDepth--; }
