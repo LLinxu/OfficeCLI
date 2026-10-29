@@ -68,7 +68,15 @@ public partial class WordHandler
     }
 
     public List<string> Set(string path, Dictionary<string, string> properties)
-        => MarkModified(() => SetCore(path, properties));
+    {
+        // A set that applied nothing (every prop unsupported) is a no-op and
+        // must not mark the document modified — it used to rewrite the file.
+        LastSelectorSetCount = 0;
+        var wasModified = Modified;
+        var unsupported = MarkModified(() => SetCore(path, properties));
+        if (properties.Count > 0 && unsupported.Count >= properties.Count) Modified = wasModified;
+        return unsupported;
+    }
 
     private List<string> SetCore(string path, Dictionary<string, string> properties)
     {

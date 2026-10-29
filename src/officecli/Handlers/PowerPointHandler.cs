@@ -2424,8 +2424,21 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             try { OfficeCli.Core.OfficeCliMetadata.StampOnSave(_doc); }
             catch { /* best-effort audit trail */ }
         }
-        try { _doc.Save(); } catch { /* read-only or already disposed */ }
-        if (_packageStream != null)
+        // Nothing changed (e.g. a set whose every prop was unsupported): do not
+        // re-serialise or write the package — leave the file byte-identical, as
+        // the xlsx handler already does. Saving an untouched package rewrote
+        // document.xml and made a no-op command look like an edit.
+        if (Modified)
+            try { _doc.Save(); } catch { /* read-only or already disposed */ }
+        if (_packageStream != null && !Modified)
+        {
+            try { _doc.Dispose(); } catch { /* already closed */ }
+            _packageStream.Dispose();
+            _packageStream = null;
+            _backingStream?.Dispose();
+            _backingStream = null;
+        }
+        else if (_packageStream != null)
         {
             // Editable: read the in-memory package into the atomic temp BEFORE
             // _doc.Dispose() (the SDK may close the stream it was opened over on
