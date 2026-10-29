@@ -63,13 +63,13 @@ public partial class ExcelHandler
                 // WHERE result, not a tool failure — surface not_found so the
                 // JSON envelope reads clean instead of internal_error.
                 throw new Core.CliException($"No elements matched selector: {path}") { Code = "not_found" };
-            LastSelectorSetCount = targets.Count;
             foreach (var target in targets)
             {
                 var targetUnsupported = Set(target.Path, properties);
                 foreach (var u in targetUnsupported)
                     if (!unsupported.Contains(u)) unsupported.Add(u);
             }
+            LastSelectorSetCount = targets.Count; // after the per-target calls, which reset it
             return unsupported;
         }
 

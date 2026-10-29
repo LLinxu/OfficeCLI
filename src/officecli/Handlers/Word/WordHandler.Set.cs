@@ -142,13 +142,13 @@ public partial class WordHandler
                 path, Query, keyResolver: null, applyAll: false);
             if (targets.Count == 0)
                 throw new ArgumentException($"No elements matched selector: {path}");
-            LastSelectorSetCount = targets.Count;
             foreach (var target in targets)
             {
                 var targetUnsupported = Set(target.Path, properties);
                 foreach (var u in targetUnsupported)
                     if (!unsupported.Contains(u)) unsupported.Add(u);
             }
+            LastSelectorSetCount = targets.Count; // after the per-target calls, which reset it
             return unsupported;
         }
 

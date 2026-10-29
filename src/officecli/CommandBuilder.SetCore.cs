@@ -66,7 +66,9 @@ static partial class CommandBuilder
         // CONSISTENCY(selector-set): echo how many elements a multi-match
         // selector set touched so a Sheet1!row[工资>5000]-style change shows
         // its scope. Single-target paths (count 1) stay quiet.
-        int? selectorCount = !isSelectorSet ? null : handler switch
+        // A content-filter path (/Sheet1/cell[type=String]) is a selector too:
+        // report the count whenever the handler expanded one to several targets.
+        int? selectorCount = handler switch
         {
             OfficeCli.Handlers.WordHandler wh => wh.LastSelectorSetCount,
             OfficeCli.Handlers.PowerPointHandler ph => ph.LastSelectorSetCount,
