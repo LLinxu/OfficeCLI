@@ -4097,36 +4097,54 @@ public partial class PowerPointHandler
         // CONSISTENCY(escape-sequences): both \n and \t are interpreted in text=
         // properties cross-handler; resolve here so width estimation matches what
         // PowerPoint will actually render.
-        var textLines = text.Split('\n');
+        // Estimate paragraph by paragraph with that paragraph's own size: a
+        // card whose first line is a 48pt symbol and whose body is 14pt used to
+        // be measured as if every line were 48pt and reported as overflowing
+        // while PowerPoint shows it comfortably inside the shape.
         int totalLines = 0;
-        foreach (var line in textLines)
+        double estimatedHeight = spaceBeforePt + spaceAfterPt * Math.Max(paragraphs.Count - 1, 0);
+        foreach (var para in paragraphs)
         {
-            if (line.Length == 0)
-            {
-                totalLines += 1;
-                continue;
-            }
-            // Walk characters, accumulate width, wrap when exceeding usable width
-            int linesForSegment = 1;
-            double currentLineWidth = 0;
-            foreach (char ch in line)
-            {
-                double charWidth = ParseHelpers.IsCjkOrFullWidth(ch) ? fontSizePt : fontSizePt * 0.55;
-                if (currentLineWidth + charWidth > usableWidth && currentLineWidth > 0)
-                {
-                    linesForSegment++;
-                    currentLineWidth = charWidth;
-                }
-                else
-                {
-                    currentLineWidth += charWidth;
-                }
-            }
-            totalLines += linesForSegment;
-        }
+            double paraSize = 0;
+            foreach (var run in para.Elements<Drawing.Run>())
+                if (run.RunProperties?.FontSize?.HasValue == true)
+                    paraSize = Math.Max(paraSize, run.RunProperties.FontSize.Value / 100.0);
+            var paraDef = para.ParagraphProperties?.GetFirstChild<Drawing.DefaultRunProperties>();
+            if (paraSize <= 0 && paraDef?.FontSize?.HasValue == true) paraSize = paraDef.FontSize.Value / 100.0;
+            if (paraSize <= 0) paraSize = fontSizePt;
+            double paraLineHeight = fixedLineSpacingPt ?? paraSize * lineSpacingMultiplier * singleRatio;
 
-        double estimatedHeight = totalLines * lineHeight
-            + spaceBeforePt + spaceAfterPt * Math.Max(textLines.Length - 1, 0);
+            var paraText = new System.Text.StringBuilder();
+            foreach (var child in para.ChildElements)
+            {
+                if (child is Drawing.Run r) paraText.Append(r.Text?.Text ?? "");
+                else if (child is Drawing.Break) paraText.Append('\n');
+                else if (child is Drawing.Field fld) paraText.Append(fld.Text?.Text ?? "");
+            }
+            int paraLines = 0;
+            foreach (var line in paraText.ToString().Split('\n'))
+            {
+                if (line.Length == 0) { paraLines += 1; continue; }
+                int linesForSegment = 1;
+                double currentLineWidth = 0;
+                foreach (char ch in line)
+                {
+                    double charWidth = ParseHelpers.IsCjkOrFullWidth(ch) ? paraSize : paraSize * 0.55;
+                    if (currentLineWidth + charWidth > usableWidth && currentLineWidth > 0)
+                    {
+                        linesForSegment++;
+                        currentLineWidth = charWidth;
+                    }
+                    else
+                    {
+                        currentLineWidth += charWidth;
+                    }
+                }
+                paraLines += linesForSegment;
+            }
+            totalLines += paraLines;
+            estimatedHeight += paraLines * paraLineHeight;
+        }
         if (estimatedHeight > usableHeight * 1.05) // 5% tolerance for rounding
         {
             // Minimum height: text + margins must fit the INSCRIBED rect, so a
