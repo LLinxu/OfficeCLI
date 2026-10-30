@@ -4080,6 +4080,19 @@ public partial class PowerPointHandler
             if (lstDefRp?.FontSize?.HasValue == true)
                 fontSizePt = lstDefRp.FontSize.Value / 100.0;
         }
+        // A placeholder (or any shape without a direct sz) inherits its size
+        // from the layout / master / presentation defaults. Resolving through
+        // the same cascade `get` uses for effective.size keeps the estimate
+        // on the size PowerPoint actually renders instead of a flat 18pt.
+        var overflowSlidePart = shape.Ancestors<Slide>().FirstOrDefault()?.SlidePart;
+        double InheritedSizePt(Drawing.Paragraph p)
+        {
+            if (overflowSlidePart == null) return 0;
+            int lvl = p.ParagraphProperties?.Level?.Value ?? 0;
+            var eff = ResolveEffectiveDefRpCore(shape, overflowSlidePart, lvl, directRpr: null, directPpr: p.ParagraphProperties);
+            return eff.Size is > 0 ? eff.Size.Value / 100.0 : 0;
+        }
+        if (fontSizePt <= 0) fontSizePt = InheritedSizePt(paragraphs[0]);
         if (fontSizePt <= 0) fontSizePt = 18.0; // PPT default for new textboxes
 
         // Line height: fixed spacing overrides multiplier. Percent/default
@@ -4111,6 +4124,7 @@ public partial class PowerPointHandler
                     paraSize = Math.Max(paraSize, run.RunProperties.FontSize.Value / 100.0);
             var paraDef = para.ParagraphProperties?.GetFirstChild<Drawing.DefaultRunProperties>();
             if (paraSize <= 0 && paraDef?.FontSize?.HasValue == true) paraSize = paraDef.FontSize.Value / 100.0;
+            if (paraSize <= 0) paraSize = InheritedSizePt(para);
             if (paraSize <= 0) paraSize = fontSizePt;
             double paraLineHeight = fixedLineSpacingPt ?? paraSize * lineSpacingMultiplier * singleRatio;
 
