@@ -47,12 +47,21 @@ public static class McpInstaller
     {
         var pathEnv = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrEmpty(pathEnv)) return null;
+        // Windows launchers are usually `.cmd` / `.exe` wrappers; honour
+        // PATHEXT so the lookup matches what the shell would run.
+        var exts = new List<string> { "" };
+        if (OperatingSystem.IsWindows() && !Path.HasExtension(exe))
+            exts.AddRange((Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT")
+                .Split(';', StringSplitOptions.RemoveEmptyEntries));
         foreach (var dir in pathEnv.Split(Path.PathSeparator))
         {
             if (string.IsNullOrEmpty(dir)) continue;
-            string candidate;
-            try { candidate = Path.Combine(dir, exe); } catch { continue; }
-            if (File.Exists(candidate)) return candidate;
+            foreach (var ext in exts)
+            {
+                string candidate;
+                try { candidate = Path.Combine(dir, exe + ext); } catch { continue; }
+                if (File.Exists(candidate)) return candidate;
+            }
         }
         return null;
     }
@@ -239,6 +248,11 @@ public static class McpInstaller
                 UseShellExecute = false,
             };
             foreach (var a in args) psi.ArgumentList.Add(a);
+            // A bare executable name is resolved by .NET relative to the
+            // working directory before PATH on macOS/Linux, so the launch
+            // failed with "No such file or directory" even though the shell
+            // finds the CLI. Resolve it through PATH ourselves.
+            psi.FileName = ResolveOnPath(psi.FileName) ?? psi.FileName;
             using var p = Process.Start(psi);
             if (p == null) return false;
             // Async-drain both streams and bound the wait: the serial
