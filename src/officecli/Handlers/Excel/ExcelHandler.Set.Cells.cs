@@ -752,7 +752,12 @@ public partial class ExcelHandler
 
             // R24-1: numberformat="@" → force text storage. See ExcelHandler.Add.Cells.cs
             // for the matching guard on the Add path.
+            // Only when this call also wrote a value: a format-only
+            // `numberformat=@` on an existing number / boolean / error cell
+            // must change the display format, not the stored type (Excel
+            // keeps 123 numeric until the cell is re-entered).
             if (IsTextNumberFormat(styleProps)
+                && (properties.ContainsKey("value") || properties.ContainsKey("text"))
                 && cell.DataType?.Value != CellValues.SharedString
                 && cell.DataType?.Value != CellValues.InlineString
                 && cell.CellFormula == null)

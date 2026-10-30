@@ -970,7 +970,10 @@ public partial class ExcelHandler
             // non-numeric content survive the round-trip. Without this, a
             // value like "00456" gets written as <x:v>00456</x:v> with no
             // t="str" and Excel reparses it as 456 on open.
+            // Only when this call supplied a value — an Add that targets an
+            // existing cell with formatting props alone must not retype it.
             if (IsTextNumberFormat(cellStyleProps)
+                && properties.ContainsKey("value")
                 && cell.DataType?.Value != CellValues.SharedString
                 && cell.DataType?.Value != CellValues.InlineString
                 && cell.CellFormula == null)
