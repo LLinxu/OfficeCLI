@@ -445,6 +445,8 @@ public partial class ExcelHandler
 
             var rowsArray = new JsonArray();
             int lineNum = 0;
+            int totalRows = sheetData.Elements<Row>().Count();
+            bool sheetTruncated = false;
             foreach (var row in sheetData.Elements<Row>())
             {
                 lineNum++;
@@ -456,7 +458,7 @@ public partial class ExcelHandler
                     if (rowRefClip < clip.Value.R1) continue;
                     if (rowRefClip > clip.Value.R2) break;
                 }
-                if (maxLines.HasValue && emitted >= maxLines.Value) { truncated = true; break; }
+                if (maxLines.HasValue && emitted >= maxLines.Value) { truncated = true; sheetTruncated = true; break; }
 
                 var cellElements = row.Elements<Cell>();
                 if (cols != null)
@@ -484,14 +486,22 @@ public partial class ExcelHandler
                 emitted++;
             }
 
-            sheetsArray.Add((JsonNode)new JsonObject
+            // Text mode prints "... (showed N rows, M total in sheet)"; the
+            // JSON form carried no equivalent, so a --max-lines cut was
+            // indistinguishable from a sheet that simply ended there.
+            var sheetObj = new JsonObject
             {
                 ["name"] = sheetName,
+                ["totalRows"] = totalRows,
                 ["rows"] = rowsArray
-            });
+            };
+            if (sheetTruncated) sheetObj["truncated"] = true;
+            sheetsArray.Add((JsonNode)sheetObj);
         }
 
-        return new JsonObject { ["sheets"] = sheetsArray };
+        var result = new JsonObject { ["sheets"] = sheetsArray, ["totalSheets"] = worksheets.Count };
+        if (truncated) result["truncated"] = true;
+        return result;
     }
 
     private static int GetSheetColumnCount(Worksheet worksheet, SheetData? sheetData)
