@@ -2348,7 +2348,14 @@ internal static partial class ChartHelper
                     var specs = !value.Equals("none", StringComparison.OrdinalIgnoreCase) && value.Contains(';')
                         ? value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                         : new[] { value };
-                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    // CONSISTENCY(pie-only-prop): c:trendline exists on CT_BarSer,
+                    // CT_LineSer, CT_ScatterSer, CT_BubbleSer and CT_AreaSer only;
+                    // pie / doughnut / radar / surface series have no slot for it.
+                    var tlTargets = plotArea2.Descendants<OpenXmlCompositeElement>()
+                        .Where(e => e is C.BarChartSeries || e is C.LineChartSeries || e is C.ScatterChartSeries
+                                    || e is C.BubbleChartSeries || e is C.AreaChartSeries).ToList();
+                    if (tlTargets.Count == 0) { unsupported.Add(key); break; }
+                    foreach (var ser in tlTargets)
                     {
                         ser.RemoveAllChildren<C.Trendline>();
                         if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
@@ -2368,7 +2375,15 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var inv = ParseHelpers.IsTruthy(value);
-                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    // CONSISTENCY(pie-only-prop): c:invertIfNegative exists only on
+                    // CT_BarSer and CT_BubbleSer. Writing it into a line/pie/area
+                    // series produces a schema-invalid part (validate fails, Excel
+                    // repairs). Target only the series types that carry it and
+                    // report unsupported when none do.
+                    var invTargets = plotArea2.Descendants<OpenXmlCompositeElement>()
+                        .Where(e => e is C.BarChartSeries || e is C.BubbleChartSeries).ToList();
+                    if (invTargets.Count == 0) { unsupported.Add(key); break; }
+                    foreach (var ser in invTargets)
                     {
                         ser.RemoveAllChildren<C.InvertIfNegative>();
                         InsertSeriesChildInOrder(ser, new C.InvertIfNegative { Val = inv });
