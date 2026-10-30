@@ -92,6 +92,19 @@ static partial class CommandBuilder
             else if (handler is OfficeCli.Handlers.WordHandler)
             {
                 ValidateDocxPageSpec(pageFilter);
+                // A page past the end used to render as an empty document with
+                // exit 0. Bound it the same way screenshot mode does.
+                if (!string.IsNullOrEmpty(pageFilter) && handler is OfficeCli.Handlers.WordHandler docxHtmlHandler)
+                {
+                    var htmlSel = ParseDocxPageSelection(pageFilter, int.MaxValue);
+                    var firstPage = htmlSel.Count > 0 ? htmlSel.Min() : 1;
+                    if (firstPage > 1)
+                    {
+                        var total = DocxPreviewPageCount(docxHtmlHandler);
+                        if (total.HasValue && firstPage > total.Value)
+                            throw new OfficeCli.Core.CliException($"--page {firstPage} out of range (total pages: {total.Value}).") { Code = "out_of_range" };
+                    }
+                }
                 html = RenderViaRegistry(handler, "docx",
                     new OfficeCli.Core.Rendering.RenderOptions { PageFilter = pageFilter });
             }
