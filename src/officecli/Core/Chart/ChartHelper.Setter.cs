@@ -2723,7 +2723,14 @@ internal static partial class ChartHelper
                     if (angInt < 0 || angInt > 360)
                         throw new ArgumentException($"Invalid firstSliceAngle '{value}': must be in [0, 360] (degrees).");
                     sliceHost.RemoveAllChildren<C.FirstSliceAngle>();
-                    sliceHost.AppendChild(new C.FirstSliceAngle { Val = (ushort)angInt });
+                    // CT_DoughnutChart orders firstSliceAng BEFORE holeSize (and
+                    // extLst); AppendChild put it after holeSize on a doughnut,
+                    // which validate rejects and Excel repairs on open.
+                    var sliceAnchor = (OpenXmlElement?)sliceHost.GetFirstChild<C.HoleSize>()
+                                      ?? sliceHost.GetFirstChild<C.ExtensionList>();
+                    var fsa = new C.FirstSliceAngle { Val = (ushort)angInt };
+                    if (sliceAnchor != null) sliceHost.InsertBefore(fsa, sliceAnchor);
+                    else sliceHost.AppendChild(fsa);
                     break;
                 }
 
@@ -2742,7 +2749,9 @@ internal static partial class ChartHelper
                     if (holeSizeInt < 1 || holeSizeInt > 90)
                         throw new ArgumentException($"Invalid 'holeSize' value: '{value}'. Must be between 1 and 90 (OOXML ST_HoleSize).");
                     doughnut.RemoveAllChildren<C.HoleSize>();
-                    doughnut.AppendChild(new C.HoleSize { Val = (byte)holeSizeInt });
+                    var hs = new C.HoleSize { Val = (byte)holeSizeInt };
+                    var hsExt = doughnut.GetFirstChild<C.ExtensionList>();
+                    if (hsExt != null) doughnut.InsertBefore(hs, hsExt); else doughnut.AppendChild(hs);
                     break;
                 }
 
