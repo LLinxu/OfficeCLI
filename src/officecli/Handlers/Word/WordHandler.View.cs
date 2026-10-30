@@ -1177,6 +1177,40 @@ public partial class WordHandler
         };
     }
 
+    /// <summary>
+    /// Effective line height in twips when the paragraph's line rule resolves
+    /// to <c>exact</c> (direct pPr → style chain → docDefaults); null when the
+    /// effective rule is auto/atLeast or no spacing is defined.
+    /// </summary>
+    private int? ResolveExactLineHeightTwips(Paragraph para)
+    {
+        static (int line, string? rule)? Read(SpacingBetweenLines? sp)
+        {
+            if (sp?.Line?.Value == null) return null;
+            if (!int.TryParse(sp.Line.Value, out var line)) return null;
+            return (line, sp.LineRule?.HasValue == true ? sp.LineRule.InnerText : null);
+        }
+
+        var direct = Read(para.ParagraphProperties?.SpacingBetweenLines);
+        if (direct == null)
+        {
+            var visited = new HashSet<string>();
+            var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            while (styleId != null && visited.Add(styleId) && direct == null)
+            {
+                var style = FindStyleById(styleId);
+                if (style == null) break;
+                direct = Read(style.StyleParagraphProperties?.SpacingBetweenLines);
+                styleId = style.BasedOn?.Val?.Value;
+            }
+        }
+        direct ??= Read(_doc.MainDocumentPart?.StyleDefinitionsPart?.Styles?.DocDefaults
+            ?.ParagraphPropertiesDefault?.ParagraphPropertiesBaseStyle?.SpacingBetweenLines);
+
+        if (direct == null) return null;
+        return string.Equals(direct.Value.rule, "exact", StringComparison.OrdinalIgnoreCase) ? direct.Value.line : null;
+    }
+
     public List<DocumentIssue> ViewAsIssues(string? issueType = null, int? limit = null)
     {
         var issues = new List<DocumentIssue>();
@@ -1359,6 +1393,30 @@ public partial class WordHandler
                             Suggestion = "Set first-line indent to 2 characters"
                         });
                     }
+                }
+            }
+
+            // Inline picture taller than an exact line height: Word clips the
+            // drawing to the line box, so a 7cm figure renders as a thin strip.
+            var exactLineTwips = ResolveExactLineHeightTwips(para);
+            if (exactLineTwips.HasValue)
+            {
+                foreach (var drawing in para.Descendants<Drawing>())
+                {
+                    var inline = drawing.Inline;
+                    if (inline?.Extent?.Cy == null) continue; // anchored (floating) pictures are not clipped
+                    long picTwips = inline.Extent.Cy.Value / 635; // 1 twip = 635 EMU
+                    if (picTwips <= exactLineTwips.Value) continue;
+                    issues.Add(new DocumentIssue
+                    {
+                        Id = $"F{++issueNum}",
+                        Type = IssueType.Format,
+                        Severity = IssueSeverity.Warning,
+                        Subtype = Core.IssueSubtypes.PictureClippedByLineSpacing,
+                        Path = $"/body/{BuildParaPathSegment(para, lineNum + 1)}",
+                        Message = $"Inline picture ({picTwips / 20.0:0.#}pt tall) is clipped by exact line spacing ({exactLineTwips.Value / 20.0:0.#}pt)",
+                        Suggestion = $"Set lineRule=auto on the paragraph, or raise lineSpacing to at least {Math.Ceiling(picTwips / 20.0)}pt"
+                    });
                 }
             }
 
