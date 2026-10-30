@@ -57,7 +57,7 @@ public static class ExporterInvoker
                 $"Exporter plugin '{plugin.Manifest.Name}' produced no output for {idle}s — likely hung.")
             {
                 Code = "plugin_idle_timeout",
-                Suggestion = "Override with --timeout 0 or raise `idle_timeout_seconds.verbs.export` in the plugin's manifest. " +
+                Suggestion = "Set OFFICECLI_PLUGIN_IDLE_TIMEOUT_SECONDS=0 to disable the watchdog (or a larger number), or raise `idle_timeout_seconds.verbs.export` in the plugin's manifest. " +
                              "Long-running exporters should also emit `{\"heartbeat\":true}` on stderr periodically.",
             };
 

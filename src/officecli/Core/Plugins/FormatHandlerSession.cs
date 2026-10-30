@@ -301,7 +301,7 @@ internal sealed class FormatHandlerSession : IDisposable
                 {
                     Code = "plugin_idle_timeout",
                     Suggestion = $"Raise `idle_timeout_seconds.verbs.{verbForError}` in the plugin's manifest, " +
-                                 "emit periodic `{\"heartbeat\":true}` on stderr during long jobs, or pass --timeout 0 to disable.",
+                                 "emit periodic `{\"heartbeat\":true}` on stderr during long jobs, or set OFFICECLI_PLUGIN_IDLE_TIMEOUT_SECONDS=0 to disable the watchdog.",
                 };
             }
         }

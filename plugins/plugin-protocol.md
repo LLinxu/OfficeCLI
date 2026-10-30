@@ -481,7 +481,7 @@ Main runs a watchdog thread for every spawned plugin process:
   heartbeat line is consumed by the watchdog and not surfaced to the user
 - When `now - last_activity > idle_timeout`, main `Kill(entire_process_tree)`
   and reports `plugin_idle_timeout` (exit code 6)
-- `--timeout 0` disables the watchdog; manifest cannot disable
+- `OFFICECLI_PLUGIN_IDLE_TIMEOUT_SECONDS=0` in the host environment disables the watchdog (§4.2); manifest cannot disable
 
 Long opaque operations (exporter rendering, format-handler `save` on large
 files) SHOULD emit periodic heartbeats. Plugins that stream output

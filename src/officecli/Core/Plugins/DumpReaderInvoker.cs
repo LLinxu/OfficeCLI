@@ -119,7 +119,7 @@ public static class DumpReaderInvoker
                     $"Dump-reader plugin '{plugin.Manifest.Name}' produced no output for {idle}s — likely hung.")
                 {
                     Code = "plugin_idle_timeout",
-                    Suggestion = $"Override with --timeout 0 or set a longer `idle_timeout_seconds.verbs.dump` in the plugin's manifest.",
+                    Suggestion = $"Set OFFICECLI_PLUGIN_IDLE_TIMEOUT_SECONDS=0 to disable the watchdog (or a larger number), or set a longer `idle_timeout_seconds.verbs.dump` in the plugin's manifest.",
                 };
 
             if (result.ExitCode != 0)
